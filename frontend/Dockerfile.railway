@@ -1,0 +1,28 @@
+# Production image for Railway. The local dev image is ./Dockerfile (next dev);
+# this one does a real production build (next build + next start).
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci
+COPY . .
+
+# NEXT_PUBLIC_* values are inlined into the client bundle at build time, so
+# they must be present during `next build`. Railway passes service variables
+# as build args when declared here.
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json /app/package-lock.json* ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/.next ./.next
+COPY --from=build /app/public ./public
+COPY --from=build /app/next.config.ts ./
+# next start binds 0.0.0.0 and honors the PORT env var Railway injects.
+EXPOSE 3000
+CMD ["npm", "run", "start"]

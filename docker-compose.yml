@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: patientos
+    ports:
+      - "5433:5432"
+    volumes:
+      - patientos_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Runs migrations + demo seed once, then exits. Backend waits for it to
+  # finish so the app always starts with data. Idempotent, so re-running
+  # `docker compose up` will not create duplicates.
+  seed:
+    build: ./backend
+    image: patient-os-backend:local
+    entrypoint: ["/seed"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/patientos?sslmode=disable
+      APP_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: ./backend
+    image: patient-os-backend:local
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/patientos?sslmode=disable
+      APP_ENV: development
+    ports:
+      - "8081:8080"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    environment:
+      # Browser-facing URLs (host-published backend port)
+      NEXT_PUBLIC_API_URL: http://localhost:8081
+      NEXT_PUBLIC_WS_URL: ws://localhost:8081
+      # Server-side (inside the container) reaches the backend by service name
+      INTERNAL_API_URL: http://backend:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  patientos_pg_data:
